@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Barcode Scanner PWA</title>
   <link rel="manifest" href="manifest.json">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen;
@@ -24,7 +25,7 @@
       border-radius: 10px;
       font-size: 1rem;
       cursor: pointer;
-      margin: 1rem 0;
+      margin: 1rem 0.5rem 1rem 0;
     }
     input[type="text"] {
       width: 100%;
@@ -77,6 +78,8 @@
   <input type="text" id="barcodeInput" placeholder="Scanne hier den Barcode" autofocus />
 
   <input type="file" accept=".csv" onchange="handleCSV(event)" />
+  <button onclick="exportToExcel()">Scan abschließen & XLS speichern</button>
+  <button onclick="resetScan()">Zurücksetzen</button>
 
   <table id="resultTable">
     <thead>
@@ -183,6 +186,25 @@
         row.appendChild(tdCount);
         row.appendChild(tdName);
         tbody.appendChild(row);
+      }
+    }
+
+    function exportToExcel() {
+      const data = Object.entries(scannedData).map(([barcode, qty]) => ({
+        Barcode: barcode,
+        Menge: qty,
+        ItemTextName: barcodeMap[barcode] || "-"
+      }));
+      const worksheet = XLSX.utils.json_to_sheet(data);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Scans");
+      XLSX.writeFile(workbook, "barcode_scans.xlsx");
+    }
+
+    function resetScan() {
+      if (confirm("Möchtest du wirklich alle Scans zurücksetzen?")) {
+        scannedData = {};
+        updateTable();
       }
     }
   </script>
