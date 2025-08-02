@@ -92,17 +92,35 @@
     <tbody></tbody>
   </table>
 
+  <audio id="beepSound" src="https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg"></audio>
+
   <script>
     let scannedData = {};
     let barcodeMap = {};
 
-    document.getElementById("barcodeInput").addEventListener("keydown", function(event) {
+    const barcodeInput = document.getElementById("barcodeInput");
+    const beepSound = document.getElementById("beepSound");
+
+    barcodeInput.addEventListener("keydown", function(event) {
       if (event.key === "Enter") {
         const barcode = event.target.value.trim();
         if (barcode) {
           if (!scannedData[barcode]) scannedData[barcode] = 0;
           scannedData[barcode]++;
           updateTable();
+
+          // Beep abspielen
+          beepSound.currentTime = 0;
+          beepSound.play();
+
+          // Modellbezeichnung vorlesen (wenn vorhanden)
+          const name = barcodeMap[barcode];
+          if (name) {
+            const utterance = new SpeechSynthesisUtterance(name);
+            utterance.lang = 'de-DE';
+            speechSynthesis.speak(utterance);
+          }
+
           event.target.value = "";
         }
       }
