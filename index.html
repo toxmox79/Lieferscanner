@@ -35,6 +35,12 @@
       border: 1px solid #ccc;
       margin: 0.5rem 0 1rem 0;
     }
+    label.toggle {
+      display: flex;
+      align-items: center;
+      margin-bottom: 1rem;
+      gap: 0.5rem;
+    }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -77,6 +83,11 @@
   <label for="barcodeInput">Barcode-Eingabe (mit Handscanner):</label>
   <input type="text" id="barcodeInput" placeholder="Scanne hier den Barcode" autofocus />
 
+  <label class="toggle">
+    <input type="checkbox" id="speechToggle" checked />
+    Sprachausgabe aktivieren
+  </label>
+
   <input type="file" accept=".csv" onchange="handleCSV(event)" />
   <button onclick="exportToExcel()">Scan abschließen & XLS speichern</button>
   <button onclick="resetScan()">Zurücksetzen</button>
@@ -100,6 +111,7 @@
 
     const barcodeInput = document.getElementById("barcodeInput");
     const beepSound = document.getElementById("beepSound");
+    const speechToggle = document.getElementById("speechToggle");
 
     barcodeInput.addEventListener("keydown", function(event) {
       if (event.key === "Enter") {
@@ -113,9 +125,9 @@
           beepSound.currentTime = 0;
           beepSound.play();
 
-          // Modellbezeichnung vorlesen (wenn vorhanden)
+          // Modellbezeichnung vorlesen (wenn aktiviert)
           const name = barcodeMap[barcode];
-          if (name) {
+          if (speechToggle.checked && name) {
             const utterance = new SpeechSynthesisUtterance(name);
             utterance.lang = 'de-DE';
             speechSynthesis.speak(utterance);
