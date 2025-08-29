@@ -31,7 +31,7 @@
       border-radius:10px;
       font-size:1rem;
       cursor:pointer;
-      margin:1rem 0;
+      margin:0.5rem 0;
     }
     button.small{
       padding:0.25rem 0.75rem;
@@ -62,64 +62,18 @@
       background-color:var(--brand);
       color:#fff;
     }
-
-    /* Menge-Steuerung in Tabelle */
-    .qty-controls{
-      display:flex;
-      align-items:center;
-      gap:0.25rem;
-    }
+    .qty-controls{ display:flex; align-items:center; gap:0.25rem; }
     .qty-controls button.small{width:30px;height:30px}
-    input.qty-input{
-      width:70px;
-      padding:0.25rem;
-      font-size:1rem;
-      text-align:center;
-    }
-
-    /* Custom-File-Button */
+    input.qty-input{ width:70px; padding:0.25rem; font-size:1rem; text-align:center; }
     .hidden-file{display:none}
-    .file-button{
-      display:inline-block;
-      background-color:var(--brand);
-      color:#fff;
-      border:none;
-      padding:0.75rem 1.5rem;
-      border-radius:10px;
-      font-size:1rem;
-      cursor:pointer;
-      margin:1rem 0;
-      text-decoration:none;
-      user-select:none;
-    }
+    .file-button{ display:inline-block; background-color:var(--brand); color:#fff; border:none; padding:0.75rem 1.5rem; border-radius:10px; font-size:1rem; cursor:pointer; margin:0.5rem 0; text-decoration:none; user-select:none; }
     #fileName{margin-left:0.5rem; font-size:0.95rem; opacity:0.8}
-
-    /* Einstellungen */
-    .settings{
-      background:#fff;
-      border:1px solid var(--border);
-      border-radius:12px;
-      padding:1rem;
-      margin-top:0.5rem;
-    }
-    .toggle{
-      display:flex;
-      align-items:center;
-      gap:0.5rem;
-      user-select:none;
-    }
-    .inline-controls{
-      display:flex;
-      align-items:center;
-      gap:0.5rem;
-      flex-wrap:wrap;
-    }
-    .pallet-wrap{
-      display:flex;
-      align-items:center;
-      gap:0.5rem;
-    }
-    #palletCount{width:90px;text-align:center}
+    .settings{ background:#fff; border:1px solid var(--border); border-radius:12px; padding:1rem; margin-top:0.5rem; }
+    .toggle{ display:flex; align-items:center; gap:0.5rem; user-select:none; }
+    .inline-controls{ display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; }
+    .pallet-wrap{ display:flex; align-items:center; gap:0.5rem; }
+    #palletCount,#scrapCount{width:90px;text-align:center}
+    .actions{ display:flex; gap:.5rem; flex-wrap:wrap; margin-top:.75rem; }
   </style>
 </head>
 <body>
@@ -142,7 +96,8 @@
       Sprachausgabe aktivieren
     </label>
 
-    <div class="inline-controls" aria-labelledby="palletHeading">
+    <!-- Paletten -->
+    <div id="palletSection" class="inline-controls" aria-labelledby="palletHeading">
       <label id="palletHeading">Palettenerfassung</label>
       <div class="pallet-wrap">
         <button type="button" id="palletMinus" class="small" aria-label="Palette minus">−</button>
@@ -151,10 +106,27 @@
       </div>
       <small>(Tasten + / − verändern ebenfalls die Anzahl)</small>
     </div>
+
+    <!-- Schrottpaletten -->
+    <div id="scrapSection" class="inline-controls" aria-labelledby="scrapHeading">
+      <label id="scrapHeading">Schrottpaletten</label>
+      <div class="pallet-wrap">
+        <button type="button" id="scrapMinus" class="small" aria-label="Schrottpalette minus">−</button>
+        <input type="number" id="scrapCount" class="qty-input" value="0" min="0" step="1" inputmode="numeric" aria-label="Anzahl Schrottpaletten"/>
+        <button type="button" id="scrapPlus" class="small" aria-label="Schrottpalette plus">+</button>
+      </div>
+      <small>(Tasten + / − verändern ebenfalls die Anzahl)</small>
+    </div>
+
+    <!-- Zusatzoption (wirkt NICHT auf Export) -->
+    <label class="toggle" for="palletNoExchange">
+      <input type="checkbox" id="palletNoExchange"/>
+      Palette nicht tauschfähig
+    </label>
   </div>
 
   <!-- Aktionen -->
-  <div class="actions" style="display:flex; gap:.5rem; flex-wrap:wrap; margin-top:.75rem;">
+  <div class="actions">
     <button type="button" id="btnExportXls" title="Als Excel öffnen/speichern">Als XLS speichern</button>
     <button type="button" id="btnReset" title="Erfassung zurücksetzen">Zurücksetzen</button>
     <button type="button" id="btnFinalize" title="Vorgang abschließen">Abschließen</button>
@@ -178,19 +150,22 @@
 
     // ===== Audio: Bestätigungston (immer aktiv) =====
     let audioCtx = null;
-    function beep(freq = 880, durationMs = 120, volume = 0.12, type = 'sine'){
+    function beep(freq = 880, durationMs = 120, volume = 0.2, type = 'sine'){
       try{
         audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
         if(audioCtx.state === 'suspended'){ audioCtx.resume(); }
+        const time = audioCtx.currentTime;
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
         osc.type = type;
-        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-        gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+        osc.frequency.setValueAtTime(freq, time);
+        gain.gain.setValueAtTime(0, time);
+        gain.gain.linearRampToValueAtTime(volume, time + 0.005);
+        gain.gain.linearRampToValueAtTime(0.0001, time + durationMs/1000);
         osc.connect(gain);
         gain.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + durationMs/1000);
+        osc.start(time);
+        osc.stop(time + durationMs/1000 + 0.01);
       }catch(e){
         console.warn('Beep konnte nicht abgespielt werden:', e);
       }
@@ -266,8 +241,6 @@
       let best = ';';
       let bestCount = -1;
       for(const cand of candidates){
-        const delimChar = cand === '\t' ? '\t' : cand;
-        // Beim Header sind selten Quotes, aber wir zählen robust außerhalb von Quotes
         const count = countDelim(firstLine, cand === '\t' ? '\t' : cand);
         if(count > bestCount){
           bestCount = count;
@@ -337,13 +310,134 @@
           if(!scannedData[barcode]) scannedData[barcode] = 0;
           scannedData[barcode]++;
           updateTable();
-          beep(); // ✅ Bestätigungston immer aktiv bei erfolgreichem Scan
+          beep(); // Bestätigungston immer aktiv bei erfolgreichem Scan
           const spokenName = barcodeMap[barcode] ? (barcodeMap[barcode] + ', ') : '';
           speak(spokenName + 'Menge ' + scannedData[barcode]);
           event.target.value = '';
         }
       }
     });
+
+    // ===== Palettenerfassung =====
+    let palletCount = 0;
+    const palletSection = document.getElementById('palletSection');
+    const palletInput = document.getElementById('palletCount');
+    const palletPlus = document.getElementById('palletPlus');
+    const palletMinus = document.getElementById('palletMinus');
+
+    function syncPallet(){ palletInput.value = palletCount; }
+    function incPallet(){ palletCount++; syncPallet(); speak('Paletten: ' + palletCount); }
+    function decPallet(){ if(palletCount>0){ palletCount--; syncPallet(); speak('Paletten: ' + palletCount); } }
+
+    palletPlus.addEventListener('click', incPallet);
+    palletMinus.addEventListener('click', decPallet);
+    palletInput.addEventListener('change', () => {
+      const v = parseInt(palletInput.value, 10);
+      palletCount = isNaN(v) || v < 0 ? 0 : v;
+      syncPallet();
+    });
+
+    // ===== Schrottpaletten =====
+    let scrapCount = 0;
+    const scrapSection = document.getElementById('scrapSection');
+    const scrapInput = document.getElementById('scrapCount');
+    const scrapPlus = document.getElementById('scrapPlus');
+    const scrapMinus = document.getElementById('scrapMinus');
+
+    function syncScrap(){ scrapInput.value = scrapCount; }
+    function incScrap(){ scrapCount++; syncScrap(); speak('Schrottpaletten: ' + scrapCount); }
+    function decScrap(){ if(scrapCount>0){ scrapCount--; syncScrap(); speak('Schrottpaletten: ' + scrapCount); } }
+
+    scrapPlus.addEventListener('click', incScrap);
+    scrapMinus.addEventListener('click', decScrap);
+    scrapInput.addEventListener('change', ()=>{
+      const v = parseInt(scrapInput.value,10);
+      scrapCount = isNaN(v)||v<0 ? 0 : v;
+      syncScrap();
+    });
+
+    // ===== Aktiver Zähler für Tastatur-Shortcuts (wie Paletten) =====
+    let activeCounter = 'pallet'; // 'pallet' | 'scrap'
+    function setActive(counter){ activeCounter = counter; }
+    ['focusin','click'].forEach(ev => {
+      palletSection.addEventListener(ev, ()=>setActive('pallet'));
+      scrapSection.addEventListener(ev,  ()=>setActive('scrap'));
+    });
+
+    // Tastatur-Shortcuts für + / − (nur wenn nicht in einem Eingabefeld getippt wird)
+    document.addEventListener('keydown', (e) => {
+      const ae = document.activeElement;
+      const isInput = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
+      if(isInput && ae !== document.body) return;
+
+      if(e.key === '+' || e.key === 'Add'){
+        if(activeCounter === 'scrap') incScrap(); else incPallet();
+      }
+      if(e.key === '-' || e.key === 'Subtract'){
+        if(activeCounter === 'scrap') decScrap(); else decPallet();
+      }
+    });
+
+    // ===== Zusatzoption (nur UI) =====
+    const palletNoExchangeEl = document.getElementById('palletNoExchange');
+
+    // ===== Aktionen: Export, Reset, Abschließen =====
+    function objectEntriesSorted(obj){
+      return Object.entries(obj).sort((a,b)=> a[0].localeCompare(b[0], 'de'));
+    }
+
+    function exportXls(){
+      const rows = objectEntriesSorted(scannedData);
+      const timestamp = new Date().toISOString().replace(/[:T]/g,'-').slice(0,19);
+      let tableHtml = '<table border="1"><thead><tr><th>Barcode</th><th>Menge</th><th>ItemTextName</th></tr></thead><tbody>';
+      for(const [barcode,count] of rows){
+        const name = (barcodeMap[barcode] || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        tableHtml += '<tr><td style=\'mso-number-format:"@"; white-space:nowrap\'>' + String(barcode) + '</td><td>' + count + '</td><td>' + name + '</td></tr>';
+      }
+      tableHtml += '</tbody></table>';
+
+      const summary = '<p><strong>Paletten:</strong> ' + palletCount + '</p>'
+        + '<p><strong>Schrottpaletten:</strong> ' + scrapCount + '</p>';
+
+      const htmlDoc = '<html><head><meta charset="utf-8"></head><body>'
+        + '<h3>Barcode-Erfassung</h3>'
+        + '<p><strong>Exportzeit:</strong> ' + new Date().toLocaleString() + '</p>'
+        + summary + tableHtml + '</body></html>';
+
+      const blob = new Blob(['\ufeff' + htmlDoc], {type: 'application/vnd.ms-excel'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'barcode_export_' + timestamp + '.xls';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function resetAll(){
+      if(!confirm('Wirklich alles zurücksetzen?\nMengen, Tabelle und Erfassungen werden geleert.')) return;
+      scannedData = {};
+      palletCount = 0; syncPallet();
+      scrapCount = 0;  syncScrap();
+      updateTable();
+      beep(440, 80); // kurzer tieferer Ton als Bestätigung
+    }
+
+    function finalize(){
+      const doExport = confirm('Vorgang abschließen?\nMöchten Sie die Erfassung vorher als XLS speichern?\nOK = Speichern & Abschließen, Abbrechen = nur Abschließen');
+      if(doExport){ exportXls(); }
+      scannedData = {};
+      palletCount = 0; syncPallet();
+      scrapCount = 0;  syncScrap();
+      updateTable();
+      beep(660, 150);
+      alert('Erfassung abgeschlossen.');
+    }
+
+    document.getElementById('btnExportXls').addEventListener('click', exportXls);
+    document.getElementById('btnReset').addEventListener('click', resetAll);
+    document.getElementById('btnFinalize').addEventListener('click', finalize);
 
     // ===== Tabelle aktualisieren =====
     function updateTable(){
@@ -410,103 +504,6 @@
         tbody.appendChild(row);
       }
     }
-
-    // ===== Palettenerfassung =====
-    let palletCount = 0;
-    const palletInput = document.getElementById('palletCount');
-    const palletPlus = document.getElementById('palletPlus');
-    const palletMinus = document.getElementById('palletMinus');
-
-    function syncPallet(){
-      palletInput.value = palletCount;
-    }
-    function incPallet(){
-      palletCount++;
-      syncPallet();
-      speak('Paletten: ' + palletCount);
-    }
-    function decPallet(){
-      if(palletCount > 0){
-        palletCount--;
-        syncPallet();
-        speak('Paletten: ' + palletCount);
-      }
-    }
-
-    palletPlus.addEventListener('click', incPallet);
-    palletMinus.addEventListener('click', decPallet);
-    palletInput.addEventListener('change', () => {
-      const v = parseInt(palletInput.value, 10);
-      palletCount = isNaN(v) || v < 0 ? 0 : v;
-      syncPallet();
-    });
-
-    // Tastatur-Shortcuts für + / − (nur wenn nicht in einem Eingabefeld getippt wird)
-    document.addEventListener('keydown', (e) => {
-      const ae = document.activeElement;
-      const isInput = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
-      if(isInput && ae !== document.body) return;
-
-      if(e.key === '+' || e.key === 'Add'){ incPallet(); }
-      if(e.key === '-' || e.key === 'Subtract'){ decPallet(); }
-    });
-    // ===== Aktionen: Export, Reset, Abschließen =====
-    function objectEntriesSorted(obj){
-      return Object.entries(obj).sort((a,b)=> a[0].localeCompare(b[0], 'de'));
-    }
-
-    function exportXls(){
-      const rows = objectEntriesSorted(scannedData);
-      const timestamp = new Date().toISOString().replace(/[:T]/g,'-').slice(0,19);
-      let tableHtml = '<table border="1"><thead><tr><th>Barcode</th><th>Menge</th><th>ItemTextName</th></tr></thead><tbody>';
-      for(const [barcode,count] of rows){
-        const name = (barcodeMap[barcode] || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        tableHtml += '<tr><td>' + barcode + '</td><td>' + count + '</td><td>' + name + '</td></tr>';
-      }
-      tableHtml += '</tbody></table>';
-
-      const summary = '<p><strong>Paletten:</strong> ' + (typeof palletCount !== 'undefined' ? palletCount : 0) + '</p>';
-      const htmlDoc = '<html><head><meta charset="utf-8"></head><body>'
-        + '<h3>Barcode-Erfassung</h3>'
-        + '<p><strong>Exportzeit:</strong> ' + new Date().toLocaleString() + '</p>'
-        + summary + tableHtml + '</body></html>';
-
-      const blob = new Blob(['\ufeff' + htmlDoc], {type: 'application/vnd.ms-excel'});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'barcode_export_' + timestamp + '.xls';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }
-
-    function resetAll(){
-      if(!confirm('Wirklich alles zurücksetzen?\nMengen, Tabelle und Palettenerfassung werden geleert.')) return;
-      scannedData = {};
-      palletCount = 0;
-      syncPallet();
-      updateTable();
-      beep(440, 80); // kurzer tieferer Ton als Bestätigung
-    }
-
-    function finalize(){
-      // einfache Routine: Export anbieten und dann leeren
-      const doExport = confirm('Vorgang abschließen?\nMöchten Sie die Erfassung vorher als XLS speichern?\nOK = Speichern & Abschließen, Abbrechen = nur Abschließen');
-      if(doExport){
-        exportXls();
-      }
-      scannedData = {};
-      updateTable();
-      beep(660, 150);
-      alert('Erfassung abgeschlossen.');
-    }
-
-    document.getElementById('btnExportXls').addEventListener('click', exportXls);
-    document.getElementById('btnReset').addEventListener('click', resetAll);
-    document.getElementById('btnFinalize').addEventListener('click', finalize);
-
   </script>
 </body>
 </html>
