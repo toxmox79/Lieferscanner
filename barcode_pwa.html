@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Barcode Scanner PWA</title>
+  <title>Barcode Scanner PWA – mit Zuständen</title>
   <link rel="manifest" href="manifest.json">
   <style>
     :root{
@@ -57,27 +57,26 @@
       padding:0.5rem;
       border:1px solid var(--border);
       text-align:left;
+      vertical-align:top;
     }
     th{
       background-color:var(--brand);
       color:#fff;
     }
 
-    /* Menge-Steuerung in Tabelle */
-    .qty-controls{
-      display:flex;
-      align-items:center;
-      gap:0.25rem;
-    }
-    .qty-controls button.small{width:30px;height:30px}
-    input.qty-input{
-      width:70px;
-      padding:0.25rem;
-      font-size:1rem;
-      text-align:center;
-    }
+    /* Per-Zustand-Steuerung */
+    .state-controls{ display:flex; gap:.5rem; flex-wrap:wrap; align-items:center }
+    .state-chip{ display:flex; align-items:center; gap:.25rem; border:1px solid var(--border); border-radius:8px; padding:.25rem; }
+    .state-chip label{ font-size:.9rem; margin:0 .25rem 0 0; min-width:1.2rem; text-align:center; font-weight:600 }
+    .state-chip input{ width:60px; text-align:center; padding:.25rem }
+    .state-chip button.small{ width:28px; height:28px }
 
-    /* Custom-File-Button */
+    /* Aktiver Scan-Zustand-Selector */
+    .state-selector{ display:flex; gap:.5rem; align-items:center; flex-wrap:wrap }
+    .state-selector .pill{ border:1px solid var(--border); background:#fff; color:var(--text); padding:.4rem .8rem; border-radius:999px; cursor:pointer }
+    .state-selector .pill.active{ background:var(--brand); color:#fff; border-color:var(--brand) }
+
+    /* Datei-Upload */
     .hidden-file{display:none}
     .file-button{
       display:inline-block;
@@ -102,24 +101,10 @@
       padding:1rem;
       margin-top:0.5rem;
     }
-    .toggle{
-      display:flex;
-      align-items:center;
-      gap:0.5rem;
-      user-select:none;
-    }
-    .inline-controls{
-      display:flex;
-      align-items:center;
-      gap:0.5rem;
-      flex-wrap:wrap;
-    }
-    .pallet-wrap{
-      display:flex;
-      align-items:center;
-      gap:0.5rem;
-    }
-    #palletCount{width:90px;text-align:center}
+    .toggle{ display:flex; align-items:center; gap:0.5rem; user-select:none }
+    .inline-controls{ display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap }
+    .pallet-wrap{ display:flex; align-items:center; gap:0.5rem }
+    #palletCount{ width:90px; text-align:center }
   </style>
 </head>
 <body>
@@ -127,6 +112,14 @@
 
   <label for="barcodeInput">Barcode-Eingabe (mit Handscanner):</label>
   <input type="text" id="barcodeInput" placeholder="Scanne hier den Barcode" autofocus autocomplete="off"/>
+
+  <!-- Aktueller Zustands-Selector für den nächsten Scan -->
+  <div class="state-selector" aria-label="Zustand für nächsten Scan wählen">
+    <span>Scan-Zustand:</span>
+    <button type="button" class="pill active" data-state="A">A-Ware</button>
+    <button type="button" class="pill" data-state="B">B-Ware</button>
+    <button type="button" class="pill" data-state="C">C-Ware</button>
+  </div>
 
   <!-- CSV: Testgewichte hochladen -->
   <input type="file" id="csvFile" class="hidden-file" accept=".csv"/>
@@ -164,7 +157,8 @@
     <thead>
       <tr>
         <th>Barcode</th>
-        <th>Menge</th>
+        <th>Menge (Σ)</th>
+        <th>Zustand (A/B/C)</th>
         <th>ItemTextName</th>
       </tr>
     </thead>
@@ -172,9 +166,13 @@
   </table>
 
   <script>
-    // ===== Datenhaltung =====
+    // ===== Datenhaltung (mit Zustand A/B/C) =====
+    // Struktur: scannedData[barcode] = { A: number, B: number, C: number }
     let scannedData = {};
     let barcodeMap = {};
+
+    // Aktuell gewählter Zustand für den nächsten Scan
+    let currentState = 'A';
 
     // ===== Audio: Bestätigungston (immer aktiv) =====
     let audioCtx = null;
@@ -191,9 +189,7 @@
         gain.connect(audioCtx.destination);
         osc.start();
         osc.stop(audioCtx.currentTime + durationMs/1000);
-      }catch(e){
-        console.warn('Beep konnte nicht abgespielt werden:', e);
-      }
+      }catch(e){ console.warn('Beep konnte nicht abgespielt werden:', e); }
     }
 
     // ===== Sprachausgabe (standardmäßig AUS) =====
@@ -208,73 +204,52 @@
       }
     }
 
+    // ===== Zustands-Selector (A/B/C) =====
+    const selector = document.querySelector('.state-selector');
+    selector.addEventListener('click', (e)=>{
+      const btn = e.target.closest('.pill');
+      if(!btn) return;
+      currentState = btn.getAttribute('data-state');
+      selector.querySelectorAll('.pill').forEach(p=>p.classList.toggle('active', p===btn));
+      speak(currentState + '-Ware gewählt');
+    });
+
     // ===== CSV-Upload mit Auto-Delimiter & sicherem Parser =====
     const csvFile = document.getElementById('csvFile');
     const fileNameSpan = document.getElementById('fileName');
 
     function normalizeHeader(h){
-      return h
-        .replace(/^\uFEFF/, '')           // BOM entfernen
-        .replace(/^"+|"+$/g,'')          // führende/abschließende Anführungszeichen
-        .trim()
-        .toLowerCase();
+      return h.replace(/^\uFEFF/, '').replace(/^"+|"+$/g,'').trim().toLowerCase();
     }
-
-    // Split-Funktion, die Anführungszeichen respektiert
     function splitRespectingQuotes(line, delim){
-      const out = [];
-      let cur = '';
-      let inQuotes = false;
+      const out = []; let cur = ''; let inQuotes = false;
       for(let i=0;i<line.length;i++){
         const ch = line[i];
         if(ch === '"'){
-          if(inQuotes && line[i+1] === '"'){ // escaped Quote ""
-            cur += '"';
-            i++;
-          }else{
-            inQuotes = !inQuotes;
-          }
-        }else if(ch === delim && !inQuotes){
-          out.push(cur);
-          cur = '';
-        }else{
-          cur += ch;
-        }
-      }
-      out.push(cur);
-      return out;
-    }
-
-    // Zähle Delimiter außerhalb von Anführungszeichen
-    function countDelim(line, delim){
-      let inQuotes = false;
-      let c = 0;
-      for(let i=0;i<line.length;i++){
-        const ch = line[i];
-        if(ch === '"'){
-          if(inQuotes && line[i+1] === '"'){ i++; }
+          if(inQuotes && line[i+1] === '"'){ cur += '"'; i++; }
           else { inQuotes = !inQuotes; }
-        }else if(ch === delim && !inQuotes){
-          c++;
-        }
+        }else if(ch === delim && !inQuotes){ out.push(cur); cur = ''; }
+        else{ cur += ch; }
+      }
+      out.push(cur); return out;
+    }
+    function countDelim(line, delim){
+      let inQuotes=false, c=0;
+      for(let i=0;i<line.length;i++){
+        const ch=line[i];
+        if(ch==='"'){ if(inQuotes && line[i+1]==='"'){ i++; } else { inQuotes=!inQuotes; } }
+        else if(ch===delim && !inQuotes){ c++; }
       }
       return c;
     }
-
     function detectDelimiter(firstLine){
       const candidates = [';', ',', '\t'];
-      let best = ';';
-      let bestCount = -1;
+      let best=';', bestCount=-1;
       for(const cand of candidates){
-        const delimChar = cand === '\t' ? '\t' : cand;
-        // Beim Header sind selten Quotes, aber wir zählen robust außerhalb von Quotes
-        const count = countDelim(firstLine, cand === '\t' ? '\t' : cand);
-        if(count > bestCount){
-          bestCount = count;
-          best = cand;
-        }
+        const count = countDelim(firstLine, cand==='\t'?'\t':cand);
+        if(count>bestCount){ bestCount=count; best=cand; }
       }
-      return best === '\t' ? '\t' : best;
+      return best==='\t'?'\t':best;
     }
 
     csvFile.addEventListener('change', handleCSV);
@@ -282,27 +257,19 @@
       const file = event.target.files[0];
       if(!file) return;
       fileNameSpan.textContent = file.name;
-
       const reader = new FileReader();
       reader.onload = function(e){
         const raw = e.target.result;
         const text = raw.replace(/\r/g,'');
         const lines = text.split('\n').filter(r => r.trim().length>0);
-        if(lines.length === 0){
-          alert('Die CSV ist leer.');
-          return;
-        }
-
+        if(lines.length === 0){ alert('Die CSV ist leer.'); return; }
         const delim = detectDelimiter(lines[0]);
         const headerRaw = splitRespectingQuotes(lines[0], delim);
         const headers = headerRaw.map(normalizeHeader);
-
         const wantBarcode = 'variationbarcode.code';
         const wantName = 'itemtextname';
-
         const barcodeIndex = headers.indexOf(wantBarcode);
         const nameIndex = headers.indexOf(wantName);
-
         if(barcodeIndex === -1 || nameIndex === -1){
           alert(
             'CSV-Problem:\n'
@@ -312,9 +279,7 @@
           );
           return;
         }
-
-        barcodeMap = {}; // zurücksetzen
-
+        barcodeMap = {};
         for(let i=1;i<lines.length;i++){
           const cols = splitRespectingQuotes(lines[i], delim);
           if(cols.length > Math.max(barcodeIndex, nameIndex)){
@@ -329,86 +294,85 @@
       reader.readAsText(file);
     }
 
-    // ===== Barcode-Eingabe =====
+    // ===== Barcode-Eingabe (Enter) – bucht in den gewählten Zustand =====
     document.getElementById('barcodeInput').addEventListener('keydown', function(event){
       if(event.key === 'Enter'){
         const barcode = event.target.value.trim();
         if(barcode){
-          if(!scannedData[barcode]) scannedData[barcode] = 0;
-          scannedData[barcode]++;
+          if(!scannedData[barcode]) scannedData[barcode] = {A:0,B:0,C:0};
+          scannedData[barcode][currentState]++;
           updateTable();
-          beep(); // ✅ Bestätigungston immer aktiv bei erfolgreichem Scan
-          const spokenName = barcodeMap[barcode] ? (barcodeMap[barcode] + ', ') : '';
-          speak(spokenName + 'Menge ' + scannedData[barcode]);
+          beep();
+          const name = barcodeMap[barcode] ? (barcodeMap[barcode] + ', ') : '';
+          const total = totalFor(scannedData[barcode]);
+          speak(name + currentState + '-Ware, Gesamt ' + total);
           event.target.value = '';
         }
       }
     });
 
+    // ===== Helpers =====
+    function totalFor(entry){ return (entry?.A||0) + (entry?.B||0) + (entry?.C||0); }
+    function objectEntriesSorted(obj){ return Object.entries(obj).sort((a,b)=> a[0].localeCompare(b[0], 'de')); }
+
     // ===== Tabelle aktualisieren =====
     function updateTable(){
       const tbody = document.querySelector('#resultTable tbody');
       tbody.innerHTML = '';
-
-      for(const [barcode, count] of Object.entries(scannedData)){
+      for(const [barcode, entry] of objectEntriesSorted(scannedData)){
         const row = document.createElement('tr');
 
         const tdBarcode = document.createElement('td');
         tdBarcode.textContent = barcode;
 
-        const tdCount = document.createElement('td');
-        const controls = document.createElement('div');
-        controls.className = 'qty-controls';
+        const tdTotal = document.createElement('td');
+        tdTotal.textContent = String(totalFor(entry));
 
-        const btnMinus = document.createElement('button');
-        btnMinus.className = 'small';
-        btnMinus.textContent = '−';
-        btnMinus.type = 'button';
-        btnMinus.onclick = () => {
-          if(scannedData[barcode] > 0){
-            scannedData[barcode]--;
-            updateTable();
-          }
-        };
-
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.className = 'qty-input';
-        input.value = count;
-        input.min = 0;
-        input.step = 1;
-        input.addEventListener('change', function(){
-          const newVal = parseInt(this.value, 10);
-          if(!isNaN(newVal) && newVal >= 0){
-            scannedData[barcode] = newVal;
-            updateTable();
-          }else{
-            this.value = scannedData[barcode];
-          }
-        });
-
-        const btnPlus = document.createElement('button');
-        btnPlus.className = 'small';
-        btnPlus.textContent = '+';
-        btnPlus.type = 'button';
-        btnPlus.onclick = () => {
-          scannedData[barcode]++;
-          updateTable();
-        };
-
-        controls.appendChild(btnMinus);
-        controls.appendChild(input);
-        controls.appendChild(btnPlus);
-        tdCount.appendChild(controls);
+        const tdState = document.createElement('td');
+        tdState.appendChild(renderStateControls(barcode, entry));
 
         const tdName = document.createElement('td');
         tdName.textContent = barcodeMap[barcode] || '-';
 
         row.appendChild(tdBarcode);
-        row.appendChild(tdCount);
+        row.appendChild(tdTotal);
+        row.appendChild(tdState);
         row.appendChild(tdName);
         tbody.appendChild(row);
       }
+    }
+
+    function renderStateControls(barcode, entry){
+      const wrap = document.createElement('div');
+      wrap.className = 'state-controls';
+      ['A','B','C'].forEach(state=>{
+        const chip = document.createElement('div');
+        chip.className = 'state-chip';
+        const lbl = document.createElement('label');
+        lbl.textContent = state;
+        const minus = document.createElement('button');
+        minus.type='button'; minus.className='small'; minus.textContent='−';
+        const inp = document.createElement('input');
+        inp.type='number'; inp.min=0; inp.step=1; inp.value = entry[state]||0;
+        inp.setAttribute('aria-label', `Anzahl ${state}-Ware`);
+        const plus = document.createElement('button');
+        plus.type='button'; plus.className='small'; plus.textContent='+';
+
+        minus.onclick = ()=>{ if(scannedData[barcode][state]>0){ scannedData[barcode][state]--; updateTable(); } };
+        plus.onclick = ()=>{ scannedData[barcode][state]++; updateTable(); };
+        inp.addEventListener('change', ()=>{
+          let v = parseInt(inp.value,10);
+          if(isNaN(v) || v<0){ v = entry[state]||0; }
+          scannedData[barcode][state] = v; updateTable();
+        });
+
+        chip.appendChild(lbl);
+        chip.appendChild(minus);
+        chip.appendChild(inp);
+        chip.appendChild(plus);
+        wrap.appendChild(chip);
+      });
+      return wrap;
     }
 
     // ===== Palettenerfassung =====
@@ -416,61 +380,38 @@
     const palletInput = document.getElementById('palletCount');
     const palletPlus = document.getElementById('palletPlus');
     const palletMinus = document.getElementById('palletMinus');
-
-    function syncPallet(){
-      palletInput.value = palletCount;
-    }
-    function incPallet(){
-      palletCount++;
-      syncPallet();
-      speak('Paletten: ' + palletCount);
-    }
-    function decPallet(){
-      if(palletCount > 0){
-        palletCount--;
-        syncPallet();
-        speak('Paletten: ' + palletCount);
-      }
-    }
-
+    function syncPallet(){ palletInput.value = palletCount; }
+    function incPallet(){ palletCount++; syncPallet(); speak('Paletten: ' + palletCount); }
+    function decPallet(){ if(palletCount>0){ palletCount--; syncPallet(); speak('Paletten: ' + palletCount); } }
     palletPlus.addEventListener('click', incPallet);
     palletMinus.addEventListener('click', decPallet);
-    palletInput.addEventListener('change', () => {
-      const v = parseInt(palletInput.value, 10);
-      palletCount = isNaN(v) || v < 0 ? 0 : v;
-      syncPallet();
-    });
-
-    // Tastatur-Shortcuts für + / − (nur wenn nicht in einem Eingabefeld getippt wird)
+    palletInput.addEventListener('change', () => { const v = parseInt(palletInput.value, 10); palletCount = isNaN(v)||v<0 ? 0 : v; syncPallet(); });
     document.addEventListener('keydown', (e) => {
       const ae = document.activeElement;
       const isInput = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
       if(isInput && ae !== document.body) return;
-
       if(e.key === '+' || e.key === 'Add'){ incPallet(); }
       if(e.key === '-' || e.key === 'Subtract'){ decPallet(); }
     });
-    // ===== Aktionen: Export, Reset, Abschließen =====
-    function objectEntriesSorted(obj){
-      return Object.entries(obj).sort((a,b)=> a[0].localeCompare(b[0], 'de'));
-    }
 
+    // ===== Export, Reset, Finalize =====
     function exportXls(){
       const rows = objectEntriesSorted(scannedData);
       const timestamp = new Date().toISOString().replace(/[:T]/g,'-').slice(0,19);
-      let tableHtml = '<table border="1"><thead><tr><th>Barcode</th><th>Menge</th><th>ItemTextName</th></tr></thead><tbody>';
-      for(const [barcode,count] of rows){
+      let tableHtml = '<table border="1"><thead><tr>'+
+        '<th>Barcode</th><th>Menge (Σ)</th><th>A</th><th>B</th><th>C</th><th>ItemTextName</th>'+
+        '</tr></thead><tbody>';
+      for(const [barcode,entry] of rows){
         const name = (barcodeMap[barcode] || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        tableHtml += '<tr><td>' + barcode + '</td><td>' + count + '</td><td>' + name + '</td></tr>';
+        const total = totalFor(entry);
+        tableHtml += `<tr><td>${barcode}</td><td>${total}</td><td>${entry.A||0}</td><td>${entry.B||0}</td><td>${entry.C||0}</td><td>${name}</td></tr>`;
       }
       tableHtml += '</tbody></table>';
-
       const summary = '<p><strong>Paletten:</strong> ' + (typeof palletCount !== 'undefined' ? palletCount : 0) + '</p>';
       const htmlDoc = '<html><head><meta charset="utf-8"></head><body>'
         + '<h3>Barcode-Erfassung</h3>'
         + '<p><strong>Exportzeit:</strong> ' + new Date().toLocaleString() + '</p>'
         + summary + tableHtml + '</body></html>';
-
       const blob = new Blob(['\ufeff' + htmlDoc], {type: 'application/vnd.ms-excel'});
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -488,15 +429,12 @@
       palletCount = 0;
       syncPallet();
       updateTable();
-      beep(440, 80); // kurzer tieferer Ton als Bestätigung
+      beep(440, 80);
     }
 
     function finalize(){
-      // einfache Routine: Export anbieten und dann leeren
       const doExport = confirm('Vorgang abschließen?\nMöchten Sie die Erfassung vorher als XLS speichern?\nOK = Speichern & Abschließen, Abbrechen = nur Abschließen');
-      if(doExport){
-        exportXls();
-      }
+      if(doExport){ exportXls(); }
       scannedData = {};
       updateTable();
       beep(660, 150);
@@ -506,7 +444,6 @@
     document.getElementById('btnExportXls').addEventListener('click', exportXls);
     document.getElementById('btnReset').addEventListener('click', resetAll);
     document.getElementById('btnFinalize').addEventListener('click', finalize);
-
   </script>
 </body>
 </html>
